@@ -1,0 +1,45 @@
+stages:
+  #- test
+  - deploy
+
+variables:
+  APP_DIR: $APP_DIR  # Deployment directory on the server
+
+before_script:
+  - eval $(ssh-agent -s)
+  - echo "$SSH_KEY" | tr -d '\r' | ssh-add -
+  - mkdir -p ~/.ssh
+  - echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+
+# test:
+#   stage: test
+#   script:
+#     - echo "Running tests..."
+#     - python3 -m unittest discover -s tests
+
+deploy:
+  stage: deploy
+  script:
+    - echo "Deploying to $SSH_HOST..."
+    - ssh $SSH_USER@$SSH_HOST "mkdir -p $APP_DIR"  # Ensure the application directory exists
+    - rsync -avz --exclude='.git' --exclude='venv' ./ $SSH_USER@$SSH_HOST:$APP_DIR  # Sync code
+    - |
+      # Create deploy.sh script on the remote server
+      echo -e "#!/bin/bash\n
+      cd $APP_DIR\n
+      if [ ! -d 'venv' ]; then\n
+        python3 -m venv venv\n
+      fi\n
+      source venv/bin/activate\n
+      sudo systemctl restart gyansutra\n" > deploy.sh
+      
+      # Upload the script to the remote server
+      rsync -avz deploy.sh $SSH_USER@$SSH_HOST:$APP_DIR/deploy.sh
+
+      # Set executable permissions for the script
+      ssh $SSH_USER@$SSH_HOST "chmod +x $APP_DIR/deploy.sh"
+
+      # Run the script
+      ssh $SSH_USER@$SSH_HOST "$APP_DIR/deploy.sh"
+  only:
+    - main  # Specify the branch here (e.g., "main" or "master")
